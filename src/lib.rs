@@ -1,8 +1,7 @@
 use argon2::Argon2;
 use jsonwebtoken_google::ParserError;
 use password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
-use redb::ReadableTable;
-use redb::{Database, TableDefinition};
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -136,6 +135,8 @@ where
     }
 }
 
+#[cfg(feature = "redb")]
+use redb::{Database, ReadableTable, TableDefinition};
 #[cfg(feature = "redb")]
 impl<T> PasswordStorage<T> for (Database, TableDefinition<'static, [u8], str>)
 where
