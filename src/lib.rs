@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub struct Authenticator<T, S: PasswordStorage<T>> {
+    // Login & Register
     salt: SaltString,
     password_storage: S,
     argon2: Argon2<'static>,
@@ -63,12 +64,13 @@ impl<T, S: PasswordStorage<T>> Authenticator<T, S> {
         Ok(())
     }
 
+    /// `AuthenticatorBuilder::with_google_client_id` must be called for google login support.
     /// Expects a google jwt token that was obtained with the same google client id
     /// as the one used to create the Authenticator.
     pub async fn login_with_google(
         &mut self,
         token: impl AsRef<str>,
-    ) -> Result<TokenClaims, ParserError> {
+    ) -> Result<GoogleTokenClaims, ParserError> {
         self.google_jwt_parser
             .as_ref()
             .expect("Call AuthenticatorBuilder::with_google_client_id for google login support")
@@ -85,7 +87,7 @@ impl<T, S: PasswordStorage<T>> Authenticator<T, S> {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct TokenClaims {
+pub struct GoogleTokenClaims {
     pub email: String,
     pub aud: String,
     pub iss: String,
@@ -179,7 +181,6 @@ mod tests {
         let db = unsafe { Database::create("test.db").unwrap() };
         let mut authenticator = AuthenticatorBuilder::default().finish((db, TABLE));
         authenticator.register("user", "password");
-        let result = authenticator.login("user", "password");
-        println!("{:?}", result);
+        assert!(authenticator.login("user", "password").is_ok());
     }
 }
