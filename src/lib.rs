@@ -55,7 +55,7 @@ impl<T, S: PasswordStorage<T>> Authenticator<T, S> {
         Ok(())
     }
 
-    pub fn login(&mut self, user: T, password: impl AsRef<[u8]>) -> Result<(), LoginError> {
+    pub fn login(&mut self, user: &T, password: impl AsRef<[u8]>) -> Result<(), LoginError> {
         let password_hash = self
             .password_storage
             .get_password_hash(&user)
