@@ -58,7 +58,7 @@ impl<T, S: PasswordStorage<T>> Authenticator<T, S> {
     pub fn login(&mut self, user: &T, password: impl AsRef<[u8]>) -> Result<(), LoginError> {
         let password_hash = self
             .password_storage
-            .get_password_hash(&user)
+            .get_password_hash(user)
             .ok_or(LoginError::UserNotFound)?;
         let password_hash = PasswordHash::new(&password_hash).unwrap();
         self.argon2
@@ -97,14 +97,17 @@ pub struct GoogleTokenClaims {
     pub exp: u64,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, thiserror::Error)]
 pub enum RegisterError {
+    #[error("Email already in use")]
     NotAnEmail,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, thiserror::Error)]
 pub enum LoginError {
+    #[error("Invalid password")]
     InvalidPassword,
+    #[error("User not found")]
     UserNotFound,
 }
 
@@ -182,15 +185,15 @@ mod tests {
     #[test]
     fn test_hashmap() {
         let mut authenticator = AuthenticatorBuilder::default().finish(HashMap::new());
-        authenticator.register("user", "password");
-        assert!(authenticator.login("user", "password").is_ok());
+        authenticator.register("user", "password").unwrap();
+        assert!(authenticator.login(&"user", "password").is_ok());
     }
 
     #[test]
     fn test_redb() {
         let db = unsafe { Database::create("test.db").unwrap() };
         let mut authenticator = AuthenticatorBuilder::default().finish((db, TABLE));
-        authenticator.register("user", "password");
-        assert!(authenticator.login("user", "password").is_ok());
+        authenticator.register("user", "password").unwrap();
+        assert!(authenticator.login(&"user", "password").is_ok());
     }
 }
