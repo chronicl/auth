@@ -44,7 +44,7 @@ impl<T, S: PasswordStorage<T>> Authenticator<T, S> {
         }
     }
 
-    pub fn register(&mut self, user: T, password: impl AsRef<[u8]>) {
+    pub fn register(&mut self, user: T, password: impl AsRef<[u8]>) -> Result<(), RegisterError> {
         let password_hash = self
             .argon2
             .hash_password(password.as_ref(), &self.salt)
@@ -52,14 +52,18 @@ impl<T, S: PasswordStorage<T>> Authenticator<T, S> {
             .serialize();
         self.password_storage
             .set_password_hash(user, password_hash.as_str());
+        Ok(())
     }
 
     pub fn login(&mut self, user: T, password: impl AsRef<[u8]>) -> Result<(), LoginError> {
-        let password_hash = self.password_storage.get_password_hash(&user).unwrap();
+        let password_hash = self
+            .password_storage
+            .get_password_hash(&user)
+            .ok_or(LoginError::UserNotFound)?;
         let password_hash = PasswordHash::new(&password_hash).unwrap();
         self.argon2
             .verify_password(password.as_ref(), &password_hash)
-            .unwrap();
+            .map_err(|_| LoginError::InvalidPassword)?;
         Ok(())
     }
 
@@ -91,6 +95,11 @@ pub struct GoogleTokenClaims {
     pub aud: String,
     pub iss: String,
     pub exp: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum RegisterError {
+    NotAnEmail,
 }
 
 #[derive(Debug, Clone, Copy)]
