@@ -1,5 +1,5 @@
 use argon2::Argon2;
-use jsonwebtoken_google::ParserError;
+pub use jsonwebtoken_google::ParserError;
 use password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 
 use serde::{Deserialize, Serialize};
