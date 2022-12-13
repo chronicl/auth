@@ -1,5 +1,5 @@
 use argon2::Argon2;
-pub use jsonwebtoken_google::ParserError;
+pub use jsonwebtoken_google::ParserError as GoogleError;
 use password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 
 use serde::{Deserialize, Serialize};
@@ -73,7 +73,7 @@ impl<T, S: PasswordStorage<T>> Authenticator<T, S> {
     pub async fn login_with_google(
         &mut self,
         token: impl AsRef<str>,
-    ) -> Result<GoogleTokenClaims, ParserError> {
+    ) -> Result<GoogleTokenClaims, GoogleError> {
         self.google_jwt_parser
             .as_ref()
             .expect("Call AuthenticatorBuilder::with_google_client_id for google login support")
