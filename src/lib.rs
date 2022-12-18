@@ -193,6 +193,9 @@ pub struct RedbStorage<K: Serialize> {
 }
 
 #[cfg(feature = "redb")]
+pub use redb::Error as RedbError;
+
+#[cfg(feature = "redb")]
 impl<K: Serialize> RedbStorage<K> {
     /// Inserts a new table into the database. The table definition is
     /// TableDefinition<'static, [u8], str> with name "authenticator_redb_storage".
