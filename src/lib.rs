@@ -185,12 +185,14 @@ where
     }
 }
 
+#[cfg(feature = "redb")]
 pub struct RedbStorage<K: Serialize> {
     db: Database,
     table: TableDefinition<'static, [u8], str>,
     _phantom: std::marker::PhantomData<K>,
 }
 
+#[cfg(feature = "redb")]
 impl<K: Serialize> RedbStorage<K> {
     /// Inserts a new table into the database. The table definition is
     /// TableDefinition<'static, [u8], str> with name "authenticator_redb_storage".
