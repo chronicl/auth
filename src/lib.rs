@@ -185,20 +185,46 @@ where
     }
 }
 
+pub struct RedbStorage<K: Serialize> {
+    db: Database,
+    table: TableDefinition<'static, [u8], str>,
+    _phantom: std::marker::PhantomData<K>,
+}
+
+impl<K: Serialize> RedbStorage<K> {
+    /// Inserts a new table into the database. The table definition is
+    /// TableDefinition<'static, [u8], str> with name "authenticator_redb_storage".
+    pub fn new(db: Database) -> Self {
+        let table = TableDefinition::new("authenticator_redb_storage");
+        // Making sure the table exists
+        {
+            db.begin_write().unwrap().open_table(table).unwrap();
+        }
+        Self {
+            db,
+            table,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
 #[cfg(feature = "redb")]
 use redb::{Database, ReadableTable, TableDefinition};
 #[cfg(feature = "redb")]
-impl<T> PasswordStorage<T> for (Database, TableDefinition<'static, [u8], str>)
+impl<T> PasswordStorage<T> for RedbStorage<T>
 where
-    T: AsRef<[u8]>,
+    T: Serialize,
 {
     type Error = redb::Error;
 
     fn get_password_hash(&self, user: &T) -> Result<Option<String>, Self::Error> {
-        let (db, table) = self;
+        let RedbStorage { db, table, .. } = self;
         let read_txn = db.begin_read()?;
         let table = read_txn.open_table(*table)?;
-        Ok(table.get(user.as_ref()).unwrap().map(|s| s.to_owned()))
+        Ok(table
+            .get(&bincode::serialize(user).unwrap())
+            .unwrap()
+            .map(|s| s.to_owned()))
     }
 
     fn set_password_hash(
@@ -206,11 +232,14 @@ where
         user: T,
         password_hash: impl ToString,
     ) -> Result<(), Self::Error> {
-        let (db, table) = self;
+        let RedbStorage { db, table, .. } = self;
         let write_txn = db.begin_write()?;
         {
             let mut table = write_txn.open_table(*table)?;
-            table.insert(user.as_ref(), &password_hash.to_string())?;
+            table.insert(
+                &bincode::serialize(&user).unwrap(),
+                &password_hash.to_string(),
+            )?;
         }
         write_txn.commit().unwrap();
         Ok(())
@@ -219,11 +248,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::AuthenticatorBuilder;
-    use redb::{Database, TableDefinition};
+    use crate::{AuthenticatorBuilder, RedbStorage};
+    use redb::Database;
     use std::collections::HashMap;
-
-    const TABLE: TableDefinition<[u8], str> = TableDefinition::new("my_data");
 
     #[test]
     fn test_hashmap() {
@@ -235,12 +262,7 @@ mod tests {
     #[test]
     fn test_redb() {
         let db = unsafe { Database::create("test.db").unwrap() };
-        // Making sure the table exists. It is only created on first write, so
-        // `Authenticator::register` does create it, but `Authenticator::login` would fail.
-        {
-            db.begin_write().unwrap().open_table(TABLE).unwrap();
-        }
-        let mut authenticator = AuthenticatorBuilder::default().finish((db, TABLE));
+        let mut authenticator = AuthenticatorBuilder::default().finish(RedbStorage::new(db));
         authenticator.register("user", "password").unwrap();
         assert!(authenticator.login(&"user", "password").is_ok());
     }
