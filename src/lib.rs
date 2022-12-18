@@ -17,7 +17,7 @@ pub struct Authenticator<T, S: PasswordStorage<T>> {
 }
 
 pub trait PasswordStorage<T> {
-    type Error: std::error::Error;
+    type Error: std::error::Error + 'static;
     fn get_password_hash(&self, user: &T) -> Result<Option<String>, Self::Error>;
     fn set_password_hash(
         &mut self,
@@ -49,29 +49,23 @@ impl<T, S: PasswordStorage<T>> Authenticator<T, S> {
         }
     }
 
-    pub fn register(
-        &mut self,
-        user: T,
-        password: impl AsRef<[u8]>,
-    ) -> Result<(), RegisterError<S::Error>> {
+    pub fn register(&mut self, user: T, password: impl AsRef<[u8]>) -> Result<(), RegisterError> {
         let password_hash = self
             .argon2
             .hash_password(password.as_ref(), &self.salt)
             .map_err(|_| RegisterError::HashingError)?
             .serialize();
         self.password_storage
-            .set_password_hash(user, password_hash.as_str())?;
+            .set_password_hash(user, password_hash.as_str())
+            .map_err(RegisterError::other)?;
         Ok(())
     }
 
-    pub fn login(
-        &mut self,
-        user: &T,
-        password: impl AsRef<[u8]>,
-    ) -> Result<(), LoginError<S::Error>> {
+    pub fn login(&mut self, user: &T, password: impl AsRef<[u8]>) -> Result<(), LoginError> {
         let password_hash = self
             .password_storage
-            .get_password_hash(user)?
+            .get_password_hash(user)
+            .map_err(LoginError::other)?
             .ok_or(LoginError::UserNotFound)?;
         let password_hash = PasswordHash::new(&password_hash).unwrap();
         self.argon2
@@ -110,35 +104,41 @@ pub struct GoogleTokenClaims {
     pub exp: u64,
 }
 
-#[derive(Debug, Clone, Copy, thiserror::Error)]
-pub enum RegisterError<E> {
+#[derive(Debug, thiserror::Error)]
+pub enum RegisterError {
     #[error("Email already in use")]
     NotAnEmail,
     #[error("Error hashing password")]
     HashingError,
-    #[error("Storage error")]
-    Storage(E),
+    #[error("Other error")]
+    Other(Box<dyn std::error::Error>),
 }
 
-#[derive(Debug, Clone, Copy, thiserror::Error)]
-pub enum LoginError<E> {
+#[derive(Debug, thiserror::Error)]
+pub enum LoginError {
     #[error("Invalid password")]
     InvalidPassword,
     #[error("User not found")]
     UserNotFound,
-    #[error("Storage error")]
-    Storage(E),
+    #[error("Other error")]
+    Other(Box<dyn std::error::Error>),
 }
 
-impl<E> From<E> for RegisterError<E> {
-    fn from(e: E) -> Self {
-        Self::Storage(e)
+impl LoginError {
+    pub fn other<E>(e: E) -> Self
+    where
+        E: std::error::Error + 'static,
+    {
+        Self::Other(Box::new(e))
     }
 }
 
-impl<E> From<E> for LoginError<E> {
-    fn from(e: E) -> Self {
-        Self::Storage(e)
+impl RegisterError {
+    pub fn other<E>(e: E) -> Self
+    where
+        E: std::error::Error + 'static,
+    {
+        Self::Other(Box::new(e))
     }
 }
 
