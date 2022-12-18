@@ -3,7 +3,7 @@ pub use jsonwebtoken_google::ParserError as GoogleError;
 use password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, convert::Infallible};
 
 pub struct Authenticator<T, S: PasswordStorage<T>> {
     // Login & Register
@@ -17,8 +17,13 @@ pub struct Authenticator<T, S: PasswordStorage<T>> {
 }
 
 pub trait PasswordStorage<T> {
-    fn get_password_hash(&self, user: &T) -> Option<String>;
-    fn set_password_hash(&mut self, user: T, password_hash: impl ToString);
+    type Error: std::error::Error;
+    fn get_password_hash(&self, user: &T) -> Result<Option<String>, Self::Error>;
+    fn set_password_hash(
+        &mut self,
+        user: T,
+        password_hash: impl ToString,
+    ) -> Result<(), Self::Error>;
 }
 
 impl<T, S: PasswordStorage<T>> Authenticator<T, S> {
@@ -44,21 +49,29 @@ impl<T, S: PasswordStorage<T>> Authenticator<T, S> {
         }
     }
 
-    pub fn register(&mut self, user: T, password: impl AsRef<[u8]>) -> Result<(), RegisterError> {
+    pub fn register(
+        &mut self,
+        user: T,
+        password: impl AsRef<[u8]>,
+    ) -> Result<(), RegisterError<S::Error>> {
         let password_hash = self
             .argon2
             .hash_password(password.as_ref(), &self.salt)
-            .unwrap()
+            .map_err(|_| RegisterError::HashingError)?
             .serialize();
         self.password_storage
-            .set_password_hash(user, password_hash.as_str());
+            .set_password_hash(user, password_hash.as_str())?;
         Ok(())
     }
 
-    pub fn login(&mut self, user: &T, password: impl AsRef<[u8]>) -> Result<(), LoginError> {
+    pub fn login(
+        &mut self,
+        user: &T,
+        password: impl AsRef<[u8]>,
+    ) -> Result<(), LoginError<S::Error>> {
         let password_hash = self
             .password_storage
-            .get_password_hash(user)
+            .get_password_hash(user)?
             .ok_or(LoginError::UserNotFound)?;
         let password_hash = PasswordHash::new(&password_hash).unwrap();
         self.argon2
@@ -98,17 +111,35 @@ pub struct GoogleTokenClaims {
 }
 
 #[derive(Debug, Clone, Copy, thiserror::Error)]
-pub enum RegisterError {
+pub enum RegisterError<E> {
     #[error("Email already in use")]
     NotAnEmail,
+    #[error("Error hashing password")]
+    HashingError,
+    #[error("Storage error")]
+    Storage(E),
 }
 
 #[derive(Debug, Clone, Copy, thiserror::Error)]
-pub enum LoginError {
+pub enum LoginError<E> {
     #[error("Invalid password")]
     InvalidPassword,
     #[error("User not found")]
     UserNotFound,
+    #[error("Storage error")]
+    Storage(E),
+}
+
+impl<E> From<E> for RegisterError<E> {
+    fn from(e: E) -> Self {
+        Self::Storage(e)
+    }
+}
+
+impl<E> From<E> for LoginError<E> {
+    fn from(e: E) -> Self {
+        Self::Storage(e)
+    }
 }
 
 #[derive(Default)]
@@ -138,12 +169,19 @@ impl<T> PasswordStorage<T> for HashMap<T, String>
 where
     T: std::cmp::Eq + std::hash::Hash,
 {
-    fn get_password_hash(&self, user: &T) -> Option<String> {
-        self.get(user).cloned()
+    type Error = Infallible;
+
+    fn get_password_hash(&self, user: &T) -> Result<Option<String>, Self::Error> {
+        Ok(self.get(user).cloned())
     }
 
-    fn set_password_hash(&mut self, user: T, password_hash: impl ToString) {
+    fn set_password_hash(
+        &mut self,
+        user: T,
+        password_hash: impl ToString,
+    ) -> Result<(), Self::Error> {
         self.insert(user, password_hash.to_string());
+        Ok(())
     }
 }
 
@@ -154,23 +192,28 @@ impl<T> PasswordStorage<T> for (Database, TableDefinition<'static, [u8], str>)
 where
     T: AsRef<[u8]>,
 {
-    fn get_password_hash(&self, user: &T) -> Option<String> {
+    type Error = redb::Error;
+
+    fn get_password_hash(&self, user: &T) -> Result<Option<String>, Self::Error> {
         let (db, table) = self;
-        let read_txn = db.begin_read().unwrap();
-        let table = read_txn.open_table(*table).unwrap();
-        table.get(user.as_ref()).unwrap().map(|s| s.to_owned())
+        let read_txn = db.begin_read()?;
+        let table = read_txn.open_table(*table)?;
+        Ok(table.get(user.as_ref()).unwrap().map(|s| s.to_owned()))
     }
 
-    fn set_password_hash(&mut self, user: T, password_hash: impl ToString) {
+    fn set_password_hash(
+        &mut self,
+        user: T,
+        password_hash: impl ToString,
+    ) -> Result<(), Self::Error> {
         let (db, table) = self;
-        let write_txn = db.begin_write().unwrap();
+        let write_txn = db.begin_write()?;
         {
-            let mut table = write_txn.open_table(*table).unwrap();
-            table
-                .insert(user.as_ref(), &password_hash.to_string())
-                .unwrap();
+            let mut table = write_txn.open_table(*table)?;
+            table.insert(user.as_ref(), &password_hash.to_string())?;
         }
         write_txn.commit().unwrap();
+        Ok(())
     }
 }
 
@@ -192,6 +235,11 @@ mod tests {
     #[test]
     fn test_redb() {
         let db = unsafe { Database::create("test.db").unwrap() };
+        // Making sure the table exists. It is only created on first write, so
+        // `Authenticator::register` does create it, but `Authenticator::login` would fail.
+        {
+            db.begin_write().unwrap().open_table(TABLE).unwrap();
+        }
         let mut authenticator = AuthenticatorBuilder::default().finish((db, TABLE));
         authenticator.register("user", "password").unwrap();
         assert!(authenticator.login(&"user", "password").is_ok());
