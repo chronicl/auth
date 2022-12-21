@@ -55,6 +55,14 @@ impl<T, S: PasswordStorage<T>> Authenticator<T, S> {
             .hash_password(password.as_ref(), &self.salt)
             .map_err(|_| RegisterError::HashingError)?
             .serialize();
+        if self
+            .password_storage
+            .get_password_hash(&user)
+            .map_err(RegisterError::other)?
+            .is_some()
+        {
+            return Err(RegisterError::AlreadyExists);
+        }
         self.password_storage
             .set_password_hash(user, password_hash.as_str())
             .map_err(RegisterError::other)?;
@@ -106,8 +114,8 @@ pub struct GoogleTokenClaims {
 
 #[derive(Debug, thiserror::Error)]
 pub enum RegisterError {
-    #[error("Email already in use")]
-    NotAnEmail,
+    #[error("User already exists")]
+    AlreadyExists,
     #[error("Error hashing password")]
     HashingError,
     #[error("Other error")]
