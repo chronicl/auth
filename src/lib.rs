@@ -191,7 +191,7 @@ where
 
 #[cfg(feature = "redb")]
 pub struct RedbStorage<K: Serialize> {
-    db: Database,
+    db: Arc<Database>,
     table: TableDefinition<'static, [u8], str>,
     _phantom: std::marker::PhantomData<K>,
 }
@@ -203,7 +203,7 @@ pub use redb::Error as RedbError;
 impl<K: Serialize> RedbStorage<K> {
     /// Inserts a new table into the database. The table definition is
     /// TableDefinition<'static, [u8], str> with name "authenticator_redb_storage".
-    pub fn new(db: Database) -> Self {
+    pub fn new(db: Arc<Database>) -> Self {
         let table = TableDefinition::new("authenticator_redb_storage");
         // Making sure the table exists
         {
@@ -271,7 +271,8 @@ mod tests {
     #[test]
     fn test_redb() {
         let db = unsafe { Database::create("test.db").unwrap() };
-        let mut authenticator = AuthenticatorBuilder::default().finish(RedbStorage::new(db));
+        let mut authenticator =
+            AuthenticatorBuilder::default().finish(RedbStorage::new(Arc::new(db)));
         authenticator.register("user", "password").unwrap();
         assert!(authenticator.login(&"user", "password").is_ok());
     }
