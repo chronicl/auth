@@ -9,13 +9,14 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+#[derive(Clone)]
 pub struct Authenticator<T, S: PasswordStorage<T>> {
     // Login & Register
     salt: SaltString,
     password_storage: S,
     argon2: Argon2<'static>,
 
-    google_jwt_parser: Option<jsonwebtoken_google::Parser>,
+    google_jwt_parser: Option<Arc<jsonwebtoken_google::Parser>>,
 
     _phantom: std::marker::PhantomData<T>,
 }
@@ -43,7 +44,7 @@ impl<T, S: PasswordStorage<T>> Authenticator<T, S> {
 
             google_jwt_parser: builder
                 .google_client_id
-                .map(|s| jsonwebtoken_google::Parser::new(&s)),
+                .map(|s| Arc::new(jsonwebtoken_google::Parser::new(&s))),
 
             _phantom: std::marker::PhantomData,
         }
@@ -190,6 +191,7 @@ where
 }
 
 #[cfg(feature = "redb")]
+#[derive(Clone)]
 pub struct RedbStorage<K: Serialize> {
     db: Arc<Database>,
     table: TableDefinition<'static, [u8], str>,
