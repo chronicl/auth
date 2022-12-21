@@ -49,7 +49,7 @@ impl<T, S: PasswordStorage<T>> Authenticator<T, S> {
         }
     }
 
-    pub fn register(&mut self, user: T, password: impl AsRef<[u8]>) -> Result<(), RegisterError> {
+    pub fn register(&self, user: T, password: impl AsRef<[u8]>) -> Result<(), RegisterError> {
         let password_hash = self
             .argon2
             .hash_password(password.as_ref(), &self.salt)
@@ -69,7 +69,7 @@ impl<T, S: PasswordStorage<T>> Authenticator<T, S> {
         Ok(())
     }
 
-    pub fn login(&mut self, user: &T, password: impl AsRef<[u8]>) -> Result<(), LoginError> {
+    pub fn login(&self, user: &T, password: impl AsRef<[u8]>) -> Result<(), LoginError> {
         let password_hash = self
             .password_storage
             .get_password_hash(user)
@@ -86,7 +86,7 @@ impl<T, S: PasswordStorage<T>> Authenticator<T, S> {
     /// Expects a google jwt token that was obtained with the same google client id
     /// as the one used to create the Authenticator.
     pub async fn login_with_google(
-        &mut self,
+        &self,
         token: impl AsRef<str>,
     ) -> Result<GoogleTokenClaims, GoogleError> {
         self.google_jwt_parser
