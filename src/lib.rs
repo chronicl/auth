@@ -3,7 +3,11 @@ pub use jsonwebtoken_google::ParserError as GoogleError;
 use password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, convert::Infallible};
+use std::{
+    collections::HashMap,
+    convert::Infallible,
+    sync::{Arc, Mutex},
+};
 
 pub struct Authenticator<T, S: PasswordStorage<T>> {
     // Login & Register
@@ -19,11 +23,7 @@ pub struct Authenticator<T, S: PasswordStorage<T>> {
 pub trait PasswordStorage<T> {
     type Error: std::error::Error + 'static;
     fn get_password_hash(&self, user: &T) -> Result<Option<String>, Self::Error>;
-    fn set_password_hash(
-        &mut self,
-        user: T,
-        password_hash: impl ToString,
-    ) -> Result<(), Self::Error>;
+    fn set_password_hash(&self, user: T, password_hash: impl ToString) -> Result<(), Self::Error>;
 }
 
 impl<T, S: PasswordStorage<T>> Authenticator<T, S> {
@@ -173,22 +173,18 @@ impl AuthenticatorBuilder {
 }
 
 // Password Storage impls
-impl<T> PasswordStorage<T> for HashMap<T, String>
+impl<T> PasswordStorage<T> for Arc<Mutex<HashMap<T, String>>>
 where
     T: std::cmp::Eq + std::hash::Hash,
 {
     type Error = Infallible;
 
     fn get_password_hash(&self, user: &T) -> Result<Option<String>, Self::Error> {
-        Ok(self.get(user).cloned())
+        Ok(self.lock().unwrap().get(user).cloned())
     }
 
-    fn set_password_hash(
-        &mut self,
-        user: T,
-        password_hash: impl ToString,
-    ) -> Result<(), Self::Error> {
-        self.insert(user, password_hash.to_string());
+    fn set_password_hash(&self, user: T, password_hash: impl ToString) -> Result<(), Self::Error> {
+        self.lock().unwrap().insert(user, password_hash.to_string());
         Ok(())
     }
 }
@@ -240,11 +236,7 @@ where
             .map(|s| s.to_owned()))
     }
 
-    fn set_password_hash(
-        &mut self,
-        user: T,
-        password_hash: impl ToString,
-    ) -> Result<(), Self::Error> {
+    fn set_password_hash(&self, user: T, password_hash: impl ToString) -> Result<(), Self::Error> {
         let RedbStorage { db, table, .. } = self;
         let write_txn = db.begin_write()?;
         {
@@ -263,11 +255,15 @@ where
 mod tests {
     use crate::{AuthenticatorBuilder, RedbStorage};
     use redb::Database;
-    use std::collections::HashMap;
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+    };
 
     #[test]
     fn test_hashmap() {
-        let mut authenticator = AuthenticatorBuilder::default().finish(HashMap::new());
+        let mut authenticator =
+            AuthenticatorBuilder::default().finish(Arc::new(Mutex::new(HashMap::new())));
         authenticator.register("user", "password").unwrap();
         assert!(authenticator.login(&"user", "password").is_ok());
     }
