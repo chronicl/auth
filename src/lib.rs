@@ -24,7 +24,11 @@ pub struct Authenticator<T, S: PasswordStorage<T>> {
 pub trait PasswordStorage<T> {
     type Error: std::error::Error + 'static;
     fn get_password_hash(&self, user: &T) -> Result<Option<String>, Self::Error>;
-    fn set_password_hash(&self, user: T, password_hash: impl ToString) -> Result<(), Self::Error>;
+    fn set_password_hash(
+        &self,
+        user: &T,
+        password_hash: impl AsRef<str>,
+    ) -> Result<(), Self::Error>;
 }
 
 impl<T, S: PasswordStorage<T>> Authenticator<T, S> {
@@ -50,7 +54,7 @@ impl<T, S: PasswordStorage<T>> Authenticator<T, S> {
         }
     }
 
-    pub fn register(&self, user: T, password: impl AsRef<[u8]>) -> Result<(), RegisterError> {
+    pub fn register(&self, user: &T, password: impl AsRef<[u8]>) -> Result<(), RegisterError> {
         let password_hash = self
             .argon2
             .hash_password(password.as_ref(), &self.salt)
@@ -58,7 +62,7 @@ impl<T, S: PasswordStorage<T>> Authenticator<T, S> {
             .serialize();
         if self
             .password_storage
-            .get_password_hash(&user)
+            .get_password_hash(user)
             .map_err(RegisterError::other)?
             .is_some()
         {
@@ -176,7 +180,7 @@ impl AuthenticatorBuilder {
 // Password Storage impls
 impl<T> PasswordStorage<T> for Arc<Mutex<HashMap<T, String>>>
 where
-    T: std::cmp::Eq + std::hash::Hash,
+    T: std::cmp::Eq + std::hash::Hash + Clone,
 {
     type Error = Infallible;
 
@@ -184,8 +188,14 @@ where
         Ok(self.lock().unwrap().get(user).cloned())
     }
 
-    fn set_password_hash(&self, user: T, password_hash: impl ToString) -> Result<(), Self::Error> {
-        self.lock().unwrap().insert(user, password_hash.to_string());
+    fn set_password_hash(
+        &self,
+        user: &T,
+        password_hash: impl AsRef<str>,
+    ) -> Result<(), Self::Error> {
+        self.lock()
+            .unwrap()
+            .insert(user.clone(), password_hash.as_ref().to_string());
         Ok(())
     }
 }
@@ -232,10 +242,14 @@ where
             .map(|s| String::from_utf8_lossy(&s).to_string()))
     }
 
-    fn set_password_hash(&self, user: T, password_hash: impl ToString) -> Result<(), Self::Error> {
+    fn set_password_hash(
+        &self,
+        user: &T,
+        password_hash: impl AsRef<str>,
+    ) -> Result<(), Self::Error> {
         self.insert(
-            &bincode::serialize(&user).unwrap(),
-            password_hash.to_string().as_bytes(),
+            &bincode::serialize(user).unwrap(),
+            password_hash.as_ref().as_bytes(),
         )?;
         Ok(())
     }
@@ -260,15 +274,16 @@ where
             .map(|s| s.to_owned()))
     }
 
-    fn set_password_hash(&self, user: T, password_hash: impl ToString) -> Result<(), Self::Error> {
+    fn set_password_hash(
+        &self,
+        user: &T,
+        password_hash: impl AsRef<str>,
+    ) -> Result<(), Self::Error> {
         let RedbStorage { db, table, .. } = self;
         let write_txn = db.begin_write()?;
         {
             let mut table = write_txn.open_table(*table)?;
-            table.insert(
-                &bincode::serialize(&user).unwrap(),
-                &password_hash.to_string(),
-            )?;
+            table.insert(&bincode::serialize(user).unwrap(), password_hash.as_ref())?;
         }
         write_txn.commit().unwrap();
         Ok(())
@@ -286,9 +301,9 @@ mod tests {
 
     #[test]
     fn test_hashmap() {
-        let authenticator =
-            AuthenticatorBuilder::default().finish(Arc::new(Mutex::new(HashMap::new())));
-        authenticator.register("user", "password").unwrap();
+        let authenticator = AuthenticatorBuilder::default()
+            .finish(Arc::new(Mutex::new(HashMap::<&str, String>::new())));
+        authenticator.register(&"user", "password").unwrap();
         assert!(authenticator.login(&"user", "password").is_ok());
     }
 
@@ -299,9 +314,9 @@ mod tests {
             use crate::RedbStorage;
             use redb::Database;
             let db = unsafe { Database::create("test.db").unwrap() };
-            let mut authenticator =
-                AuthenticatorBuilder::default().finish(RedbStorage::new(Arc::new(db)));
-            authenticator.register("user", "password").unwrap();
+            let storage: RedbStorage<&str> = RedbStorage::new(Arc::new(db));
+            let authenticator = AuthenticatorBuilder::default().finish(storage);
+            authenticator.register(&"user", "password").unwrap();
             assert!(authenticator.login(&"user", "password").is_ok());
         }
     }
@@ -313,7 +328,7 @@ mod tests {
             let db = sled::Config::new().temporary(true).open().unwrap();
             let tree = db.open_tree("tree").unwrap();
             let authenticator = AuthenticatorBuilder::default().finish(tree);
-            authenticator.register("user", "password").unwrap();
+            authenticator.register(&"user", "password").unwrap();
             assert!(authenticator.login(&"user", "password").is_ok());
         }
     }
