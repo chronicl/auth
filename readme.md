@@ -8,6 +8,6 @@ Hashes of the passwords can be stored in any container that implements `Password
 
 ```rust
 let mut authenticator = AuthenticatorBuilder::default().finish(HashMap::new());
-authenticator.register("user", "password");
-assert!(authenticator.login("user", "password").is_ok());
+authenticator.register(&"user", "password");
+assert!(authenticator.login(&"user", "password").is_ok());
 ```
