@@ -219,6 +219,28 @@ impl<K: Serialize> RedbStorage<K> {
     }
 }
 
+#[cfg(feature = "sled")]
+impl<T> PasswordStorage<T> for sled::Tree
+where
+    T: Serialize,
+{
+    type Error = sled::Error;
+
+    fn get_password_hash(&self, user: &T) -> Result<Option<String>, Self::Error> {
+        Ok(self
+            .get(&bincode::serialize(user).unwrap())?
+            .map(|s| String::from_utf8_lossy(&s).to_string()))
+    }
+
+    fn set_password_hash(&self, user: T, password_hash: impl ToString) -> Result<(), Self::Error> {
+        self.insert(
+            &bincode::serialize(&user).unwrap(),
+            password_hash.to_string().as_bytes(),
+        )?;
+        Ok(())
+    }
+}
+
 #[cfg(feature = "redb")]
 use redb::{Database, ReadableTable, TableDefinition};
 #[cfg(feature = "redb")]
@@ -255,8 +277,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{AuthenticatorBuilder, RedbStorage};
-    use redb::Database;
+    use crate::AuthenticatorBuilder;
+
     use std::{
         collections::HashMap,
         sync::{Arc, Mutex},
@@ -264,7 +286,7 @@ mod tests {
 
     #[test]
     fn test_hashmap() {
-        let mut authenticator =
+        let authenticator =
             AuthenticatorBuilder::default().finish(Arc::new(Mutex::new(HashMap::new())));
         authenticator.register("user", "password").unwrap();
         assert!(authenticator.login(&"user", "password").is_ok());
@@ -272,10 +294,27 @@ mod tests {
 
     #[test]
     fn test_redb() {
-        let db = unsafe { Database::create("test.db").unwrap() };
-        let mut authenticator =
-            AuthenticatorBuilder::default().finish(RedbStorage::new(Arc::new(db)));
-        authenticator.register("user", "password").unwrap();
-        assert!(authenticator.login(&"user", "password").is_ok());
+        #[cfg(feature = "redb")]
+        {
+            use crate::RedbStorage;
+            use redb::Database;
+            let db = unsafe { Database::create("test.db").unwrap() };
+            let mut authenticator =
+                AuthenticatorBuilder::default().finish(RedbStorage::new(Arc::new(db)));
+            authenticator.register("user", "password").unwrap();
+            assert!(authenticator.login(&"user", "password").is_ok());
+        }
+    }
+
+    #[test]
+    fn test_sled() {
+        #[cfg(feature = "sled")]
+        {
+            let db = sled::Config::new().temporary(true).open().unwrap();
+            let tree = db.open_tree("tree").unwrap();
+            let authenticator = AuthenticatorBuilder::default().finish(tree);
+            authenticator.register("user", "password").unwrap();
+            assert!(authenticator.login(&"user", "password").is_ok());
+        }
     }
 }

@@ -2,7 +2,7 @@
 
 An extremely simple authenticator that supports password authentication and oauth authentication via google.
 
-Hashes of the passwords can be stored in any container that implements `PasswordStorage` - this crate contains impls for `HashMap` and `redb` if the `redb` feature is enabled.
+Hashes of the passwords can be stored in any container that implements `PasswordStorage` - this crate contains impls for `HashMap`, `sled` and `redb` if their respective features `sled` or `redb` are enabled.
 
 #### Example
 
